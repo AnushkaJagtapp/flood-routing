@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FloodRoute – Real-Time Flood-Aware Road Accessibility System</title>
+  <meta name="description" content="Know which roads are usable when a flood cuts off a neighbourhood. FloodRoute classifies roads as Safe, Caution, or Blocked, and guides residents to hospitals, shelters, and high ground.">
+
+  <!-- Leaflet Map CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+  
+  <!-- Custom Design System -->
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <!-- ==========================================================================
+       HEADER & LIVE TELEMETRY STATUS BAR
+       ========================================================================== -->
+  <header class="app-header">
+    <div class="brand-section">
+      <div class="brand-logo-icon">🌊</div>
+      <div>
+        <div class="brand-title">
+          FloodRoute
+          <span class="brand-badge">Tata Social Innovator Prototype</span>
+        </div>
+        <div class="brand-subtitle">Real-Time Flood-Aware Road Accessibility & Life-Safe Routing</div>
+      </div>
+    </div>
+
+    <!-- Live Telemetry District Ticker -->
+    <div class="telemetry-ticker">
+      <div class="ticker-item">
+        <span class="indicator-dot dot-green"></span>
+        <span class="ticker-label">Accessible Roads:</span>
+        <span class="ticker-val" id="stat-passable-pct">--</span>
+      </div>
+      <div class="ticker-item">
+        <span class="indicator-dot dot-red"></span>
+        <span class="ticker-label">Submerged Hazards:</span>
+        <span class="ticker-val" id="stat-blocked-count">--</span>
+      </div>
+      <div class="ticker-item">
+        <span class="indicator-dot dot-blue"></span>
+        <span class="ticker-label">River Level:</span>
+        <span class="ticker-val" id="stat-river-level">--</span>
+      </div>
+    </div>
+
+    <!-- Mode Selector & Emergency Tools -->
+    <div class="header-actions">
+      <button class="btn btn-sm btn-outline-cyan" id="btn-low-bandwidth" title="Low data & SMS transmission mode">
+        📱 SMS / 2G Mode
+      </button>
+
+      <button class="btn btn-sm btn-outline-cyan" id="btn-audio-toggle" title="Toggle audio cues for hazards">
+        🔊 Audio On
+      </button>
+
+      <div class="role-selector-wrap">
+        <label for="role-mode-selector" style="font-size: 10px; color: var(--text-muted); margin-right: 4px;">VIEW:</label>
+        <select id="role-mode-selector">
+          <option value="citizen">Citizen Resident</option>
+          <option value="authority">Emergency Responder / DDMA</option>
+        </select>
+      </div>
+
+      <button class="btn btn-sm btn-danger" id="btn-trigger-sos">
+        🚨 Emergency SOS
+      </button>
+    </div>
+  </header>
+
+  <!-- ==========================================================================
+       MAIN WORKSPACE
+       ========================================================================== -->
+  <main class="app-body">
+    
+    <!-- LEFT SIDEBAR: Navigation, Directory, Incident Reporting -->
+    <aside class="sidebar-panel">
+      
+      <!-- Nav Tabs -->
+      <nav class="sidebar-nav-tabs">
+        <button class="sidebar-nav-tab active" data-tab="routing">
+          <span>🧭</span> Route Finder
+        </button>
+        <button class="sidebar-nav-tab" data-tab="directory">
+          <span>🛣️</span> Roads (<span id="tab-roads-count">15</span>)
+        </button>
+        <button class="sidebar-nav-tab" data-tab="reports">
+          <span>📢</span> Reports
+        </button>
+        <button class="sidebar-nav-tab" data-tab="authority">
+          <span>⚡</span> Command
+        </button>
+      </nav>
+
+      <!-- Tab Content Area -->
+      <div class="sidebar-content-area">
+
+        <!-- TAB 1: SMART FLOOD-AWARE ROUTING -->
+        <div class="tab-content-panel active" id="panel-routing">
+          <div class="card-section">
+            <div class="section-headline">
+              <span>Select Vehicle Mode</span>
+              <span style="font-size: 10px; color: var(--text-muted);">Water Clearance</span>
+            </div>
+
+            <!-- Vehicle Mode Grid -->
+            <div class="vehicle-selector-grid">
+              <button class="vehicle-card-btn" data-vehicle="pedestrian">
+                <span class="v-icon">🚶</span>
+                <span class="v-name">Walking</span>
+              </button>
+              <button class="vehicle-card-btn" data-vehicle="two_wheeler">
+                <span class="v-icon">🛵</span>
+                <span class="v-name">2-Wheeler</span>
+              </button>
+              <button class="vehicle-card-btn selected" data-vehicle="sedan">
+                <span class="v-icon">🚗</span>
+                <span class="v-name">Sedan</span>
+              </button>
+              <button class="vehicle-card-btn" data-vehicle="suv">
+                <span class="v-icon">🚙</span>
+                <span class="v-name">SUV 4x4</span>
+              </button>
+              <button class="vehicle-card-btn" data-vehicle="emergency">
+                <span class="v-icon">🚒</span>
+                <span class="v-name">Rescue</span>
+              </button>
+            </div>
+
+            <div class="vehicle-clearance-badge" id="vehicle-clearance-info">
+              <strong>Sedan / Hatchback</strong>: Safe max water clearance <strong>22 cm</strong>.
+              <span class="note">Air intake hydrostatic lock risk above 20cm, loss of traction</span>
+            </div>
+
+            <!-- Route Inputs -->
+            <div class="route-inputs-stack">
+              <div class="input-group">
+                <label class="input-label" for="route-start-select">
+                  <span>📍</span> Origin (Your Current Location):
+                </label>
+                <select class="input-select" id="route-start-select"></select>
+              </div>
+
+              <!-- Quick Destination Presets -->
+              <div>
+                <label class="input-label">
+                  <span>🎯</span> Quick Emergency Destinations:
+                </label>
+                <div class="preset-chips-row">
+                  <div class="destination-preset-chip active" data-target-node="N2">
+                    🏥 Metro Hospital
+                  </div>
+                  <div class="destination-preset-chip" data-target-node="N8">
+                    ⛺ St. Jude Shelter
+                  </div>
+                  <div class="destination-preset-chip" data-target-node="N3">
+                    ⛰️ Ridge Safe Zone
+                  </div>
+                  <div class="destination-preset-chip" data-target-node="N10">
+                    🚉 Metro Hub
+                  </div>
+                </div>
+              </div>
+
+              <div class="input-group">
+                <label class="input-label" for="route-end-select">
+                  <span>🏁</span> Destination:
+                </label>
+                <select class="input-select" id="route-end-select"></select>
+              </div>
+
+              <button class="btn btn-primary btn-block" id="btn-find-safe-route">
+                <span>🛡️</span> Find Accessible Safe Route
+              </button>
+            </div>
+          </div>
+
+          <!-- Route Calculation Results -->
+          <div id="route-result-container"></div>
+        </div>
+
+        <!-- TAB 2: ROAD DIRECTORY & STATUS -->
+        <div class="tab-content-panel" id="panel-directory">
+          <div class="card-section">
+            <div class="section-headline">
+              <span>District Road Network</span>
+              <span style="font-size: 10px; color: var(--text-muted);">Real-Time Depth</span>
+            </div>
+            
+            <div class="directory-filter-row">
+              <button class="filter-btn active" onclick="window.FloodRouteApp.renderRoadDirectory('ALL')">All</button>
+              <button class="filter-btn" onclick="window.FloodRouteApp.renderRoadDirectory('SAFE')">Safe</button>
+              <button class="filter-btn" onclick="window.FloodRouteApp.renderRoadDirectory('CAUTION')">Caution</button>
+              <button class="filter-btn" onclick="window.FloodRouteApp.renderRoadDirectory('BLOCKED')">Blocked</button>
+            </div>
+
+            <div class="road-directory-list" id="road-directory-list"></div>
+          </div>
+        </div>
+
+        <!-- TAB 3: CITIZEN REPORTS & INCIDENTS FEED -->
+        <div class="tab-content-panel" id="panel-reports">
+          <div class="card-section">
+            <div class="section-headline">
+              <span>Ground-Truth Intelligence</span>
+              <button class="btn btn-xs btn-primary" id="btn-open-report-modal">
+                ➕ Report Condition
+              </button>
+            </div>
+            <p style="font-size: 11px; color: var(--text-secondary); margin-bottom: 12px;">
+              Citizen reports are verified by local authorities and municipal flood sensors to eliminate navigation traps.
+            </p>
+
+            <div class="reports-feed-container" id="reports-feed-container"></div>
+          </div>
+        </div>
+
+        <!-- TAB 4: AUTHORITY & DISPATCH COMMAND -->
+        <div class="tab-content-panel" id="panel-authority">
+          <div class="card-section">
+            <div class="section-headline">
+              <span>Municipal Command Center</span>
+              <span class="status-pill status-emergency_only">DDMA ACTIVE</span>
+            </div>
+
+            <div class="command-alert-box">
+              <div style="font-size: 12px; font-weight: 700; color: #38bdf8; margin-bottom: 4px;">
+                Priority Evacuation Protocols
+              </div>
+              <p style="font-size: 11px; color: var(--text-secondary); line-height: 1.4;">
+                Authorities can place digital barricades on submerged underpasses, designate emergency-only boat lanes, and push warning blasts to citizens.
+              </p>
+            </div>
+
+            <div class="command-actions-grid">
+              <button class="btn btn-warning btn-block" id="btn-auth-broadcast">
+                📢 Broadcast District Sirens & SMS Alert
+              </button>
+              <button class="btn btn-primary btn-block" id="btn-auth-dispatch-boat">
+                🚤 Deploy Rescue Boats to Rivergate
+              </button>
+            </div>
+
+            <div style="margin-top: 16px;">
+              <div style="font-size: 11px; font-weight: 700; color: var(--text-secondary); margin-bottom: 8px;">
+                Active Evacuation Corridors:
+              </div>
+              <div style="background: rgba(0,0,0,0.3); padding: 10px; border-radius: 8px; font-size: 11px; color: var(--text-primary);">
+                • <strong>North Ring Flyover</strong> (100% Dry - High Clearance Corridor)<br>
+                • <strong>South Relief Corridor</strong> (Reserved for NDRF Boats & Ambulances)<br>
+                • <strong>Rivergate Underpass</strong> (BARRICADED - 85cm water)
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </aside>
+
+    <!-- RIGHT: INTERACTIVE MAP VIEWPORT -->
+    <section class="map-viewport">
+      <div id="map"></div>
+
+      <!-- Floating Road Inspector (Pop-up on road click) -->
+      <div class="floating-road-inspector hidden" id="floating-road-inspector"></div>
+
+      <!-- Bottom Dock: Flood Progression Timeline Controller -->
+      <div class="bottom-dock-controller">
+        <div class="sim-playback-cluster">
+          <button class="sim-btn" id="sim-prev-btn" title="Previous Phase">⏮️</button>
+          <button class="sim-btn sim-play-main" id="sim-play-btn" title="Simulate Flood Progression">
+            ▶️ Play Demo
+          </button>
+          <button class="sim-btn" id="sim-next-btn" title="Next Phase">⏭️</button>
+        </div>
+
+        <div class="sim-slider-cluster">
+          <div class="sim-stage-info">
+            <span class="sim-time-badge" id="sim-time-label">T+4 hrs (12:00 PM)</span>
+            <span class="sim-stage-title-text" id="sim-stage-title">River Crests Over Warning Mark</span>
+          </div>
+          <input type="range" class="sim-timeline-slider" id="sim-timeline-slider" min="0" max="4" step="1" value="2">
+          <div style="font-size: 10px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" id="sim-stage-desc">
+            Dam release reaches city. River breaches embankment at South Promenade and submerges underpass.
+          </div>
+        </div>
+
+        <div class="sim-gauge-telemetry" id="river-gauge-display">
+          🌊 River Level: <strong>3.8m</strong> <span class="danger-tag">DANGER BREACH</span>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ==========================================================================
+       MODAL: REPORT ROAD CONDITION (CITIZEN CROWDSOURCING)
+       ========================================================================== -->
+  <div class="modal-overlay" id="modal-report-condition">
+    <div class="modal-window">
+      <div class="modal-header">
+        <div class="modal-title">
+          <span>📢</span> Report Road Condition
+        </div>
+        <button class="btn-close-inspector" onclick="window.FloodRouteApp.closeModal('modal-report-condition')">✕</button>
+      </div>
+
+      <form id="citizen-report-form">
+        <div class="modal-body">
+          <div class="form-group">
+            <label class="form-label" for="report-road-select">Select Road Segment:</label>
+            <select class="input-select" id="report-road-select"></select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="report-depth-input">Observed Water Depth (in cm):</label>
+            <input type="number" class="form-input" id="report-depth-input" min="0" max="150" value="30" placeholder="e.g. 25 cm (Knee high)">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="report-flow-input">Water Current Speed:</label>
+            <select class="input-select" id="report-flow-input">
+              <option value="Standing puddle / Slow drainage">Standing water / Stagnant puddle</option>
+              <option value="Moderate moving runoff" selected>Moderate moving runoff</option>
+              <option value="Fast torrent / Swift dangerous current">Fast torrent / Swift dangerous current</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="report-hazard-type">Observed Road Hazard:</label>
+            <select class="input-select" id="report-hazard-type">
+              <option value="Waterlogged road / High depth">Waterlogged road / High depth</option>
+              <option value="Submerged car stalled">Submerged car stalled</option>
+              <option value="Open manhole / drain grating missing">Open manhole / drain grating missing</option>
+              <option value="Fallen tree or debris blocking lane">Fallen tree or debris blocking lane</option>
+              <option value="Downed electrical pole / live wire">Downed electrical pole / live wire</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="report-desc-input">Additional Description & Landmarks:</label>
+            <textarea class="form-textarea" id="report-desc-input" placeholder="e.g. Water is rising fast near the bridge entrance. Hatchbacks cannot cross."></textarea>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="report-name-input">Your Name or Volunteer ID:</label>
+            <input type="text" class="form-input" id="report-name-input" placeholder="e.g. Anand R. (Resident)">
+          </div>
+        </div>
+
+        <div style="display: flex; gap: 10px; justify-content: flex-end;">
+          <button type="button" class="btn btn-outline-cyan" onclick="window.FloodRouteApp.closeModal('modal-report-condition')">Cancel</button>
+          <button type="submit" class="btn btn-primary">Submit Report</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ==========================================================================
+       MODAL: LOW-BANDWIDTH & 2G SMS GATEWAY
+       ========================================================================== -->
+  <div class="modal-overlay" id="modal-sms-offline">
+    <div class="modal-window">
+      <div class="modal-header">
+        <div class="modal-title">
+          <span>📱</span> Low-Bandwidth & SMS Emergency Gateway
+        </div>
+        <button class="btn-close-inspector" onclick="window.FloodRouteApp.closeModal('modal-sms-offline')">✕</button>
+      </div>
+
+      <div class="modal-body">
+        <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 12px;">
+          When mobile towers lose power or data network congests, FloodRoute transmits compact SMS bulletins (&lt;160 chars) and plain text routes over 2G cellular.
+        </p>
+
+        <label class="form-label">160-Character Condensed Emergency SMS Broadcast:</label>
+        <div class="sms-terminal-box" id="sms-condensed-output"></div>
+
+        <label class="form-label">Turn-by-Turn Offline Safe Route Digest:</label>
+        <div class="sms-terminal-box" id="sms-turnbyturn-output"></div>
+      </div>
+
+      <div style="display: flex; gap: 10px; justify-content: space-between;">
+        <button class="btn btn-outline-cyan" onclick="navigator.clipboard.writeText(document.getElementById('sms-turnbyturn-output').textContent); alert('Copied safe directions to clipboard!');">
+          📋 Copy Directions
+        </button>
+        <button class="btn btn-primary" onclick="window.FloodRouteApp.closeModal('modal-sms-offline'); window.FloodRouteApp.showToast('SMS broadcast pushed to registered neighbourhood numbers', 'success');">
+          📡 Simulate SMS Blast
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==========================================================================
+       MODAL: EMERGENCY EVACUATION SOS
+       ========================================================================== -->
+  <div class="modal-overlay" id="modal-sos-active">
+    <div class="modal-window" style="border-color: #ef4444;">
+      <div class="modal-header">
+        <div class="modal-title" style="color: #ef4444;">
+          <span>🚨</span> Emergency SOS Distress Signal
+        </div>
+        <button class="btn-close-inspector" onclick="window.FloodRouteApp.closeModal('modal-sos-active')">✕</button>
+      </div>
+
+      <div class="modal-body">
+        <div style="background: rgba(239,68,68,0.15); border: 1px solid #ef4444; border-radius: 8px; padding: 14px; margin-bottom: 14px;">
+          <div style="font-weight: 800; font-size: 14px; color: #fca5a5; margin-bottom: 4px;">
+            SOS BEACON ACTIVE (GPS PIN: 13.0780, 80.2610)
+          </div>
+          <p style="font-size: 11px; color: #ffffff;">
+            Your coordinates and current flood depth estimate have been flagged in the Disaster Management Command queue.
+          </p>
+        </div>
+
+        <div style="font-size: 12px; color: var(--text-primary); line-height: 1.6;">
+          • Nearest High Ground Haven: <strong>Greenridge Ridge Park (18.5m elev)</strong><br>
+          • Nearest Operational Hospital: <strong>Metropolitan General Hospital (48 beds)</strong><br>
+          • State Disaster Helpline: <strong style="color: #38bdf8;">1077</strong> | Police: <strong style="color: #38bdf8;">112</strong><br>
+          • Stay above ground level. Avoid walking in moving water above 15cm.
+        </div>
+      </div>
+
+      <div style="display: flex; justify-content: flex-end; gap: 10px;">
+        <button class="btn btn-danger" onclick="window.FloodRouteApp.closeModal('modal-sos-active'); window.FloodRouteApp.showToast('NDRF Rescue Team notified of your SOS beacon.', 'success');">
+          Confirm Emergency Alert
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scripts -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script src="js/data.js"></script>
+  <script src="js/routing.js"></script>
+  <script src="js/simulation.js"></script>
+  <script src="js/reporting.js"></script>
+  <script src="js/offline.js"></script>
+  <script src="js/map.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
